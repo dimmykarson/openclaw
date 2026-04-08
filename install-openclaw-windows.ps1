@@ -137,19 +137,15 @@ if (-not $distroOk) {
         exit 1
     }
 
-    Show-Ok "WSL2 instalado. Pode ser necessario reiniciar."
-
-    # Verifica se precisa reiniciar
-    if ($installStr -match "reinici|reboot|restart") {
-        Write-Host ""
-        Write-Host "  O computador sera reiniciado para concluir a instalacao." -ForegroundColor Yellow
-        Write-Host "  Apos reiniciar, execute este instalador novamente para instalar o OpenClaw." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Pressione ENTER para reiniciar."
-        Read-Host | Out-Null
-        Restart-Computer -Force
-        exit 0
-    }
+    Show-Ok "WSL2 instalado. O computador precisa reiniciar para concluir."
+    Write-Host ""
+    Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
+    Write-Host "  O instalador vai continuar automaticamente de onde parou." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Pressione ENTER para reiniciar agora."
+    Read-Host | Out-Null
+    Restart-Computer -Force
+    exit 0
 } else {
     Show-Ok "WSL2 com Ubuntu ja instalado."
 }
