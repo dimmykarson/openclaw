@@ -1,189 +1,195 @@
-[CmdletBinding()]
-param(
-    [switch]$SkipOnboard
-)
+# OpenClaw Installer para Windows
+# Requisito: Windows 10 (versao 2004+) ou Windows 11
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Write-Step {
-    param([string]$Message)
-    Write-Host "`n==> $Message" -ForegroundColor Cyan
+# --- Auto-elevacao para Administrador -------------------------------------------
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]"Administrator")) {
+    Write-Host "Solicitando permissao de Administrador..." -ForegroundColor Yellow
+    Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit
 }
 
-function Write-Ok {
-    param([string]$Message)
-    Write-Host "[OK] $Message" -ForegroundColor Green
-}
+Clear-Host
+Write-Host ""
+Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host "    OpenClaw - Instalador para Windows" -ForegroundColor Cyan
+Write-Host "  ================================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  Este programa vai instalar o OpenClaw no seu computador." -ForegroundColor White
+Write-Host "  Isso pode levar alguns minutos. Nao feche esta janela." -ForegroundColor White
+Write-Host ""
+Write-Host "  Pressione ENTER para comecar ou feche a janela para cancelar."
+Read-Host | Out-Null
 
-function Write-WarnMessage {
-    param([string]$Message)
-    Write-Host "[WARN] $Message" -ForegroundColor Yellow
-}
+# --- Funcoes de status ----------------------------------------------------------
 
-function Write-Fail {
-    param([string]$Message)
-    Write-Host "[ERRO] $Message" -ForegroundColor Red
-}
-
-# --- helpers --------------------------------------------------------------------
-
-function Test-Wsl2Available {
-    $wsl = Get-Command wsl -ErrorAction SilentlyContinue
-    if (-not $wsl) { return $false }
-    try {
-        $out = & wsl --list --verbose 2>&1
-        if ($LASTEXITCODE -ne 0) { return $false }
-        # pelo menos uma distro listada
-        return ($out | Where-Object { $_ -match "\S" } | Measure-Object).Count -gt 1
-    }
-    catch { return $false }
-}
-
-function Get-DefaultWslDistro {
-    try {
-        $lines = & wsl --list --verbose 2>&1
-        $default = $lines | Where-Object { $_ -match "^\s*\*" } | Select-Object -First 1
-        if ($default -match "^\s*\*\s+(\S+)") { return $Matches[1] }
-    }
-    catch {}
-    return ""
-}
-
-function Enable-WslSystemd {
-    param([string]$DistroArg)
-    $wslConf = & wsl $DistroArg -- cat /etc/wsl.conf 2>&1
-    if ($wslConf -notmatch "systemd=true") {
-        Write-WarnMessage "Habilitando systemd no WSL2 (necessario para o daemon)..."
-        & wsl $DistroArg -- bash -c "printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf > /dev/null"
-        wsl --shutdown
-        Write-Step "WSL reiniciado. Aguarde alguns segundos..."
-        Start-Sleep -Seconds 5
-    }
-}
-
-# --- instalar WSL2 --------------------------------------------------------------
-
-function Show-WslNextSteps {
+function Show-Progress {
+    param([int]$Step, [int]$Total, [string]$Message)
     Write-Host ""
-    Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
-    Write-Host "|  Apos reiniciar o Windows:                                       |" -ForegroundColor Green
-    Write-Host "|                                                                  |" -ForegroundColor Green
-    Write-Host "|  1. Abra o Ubuntu pelo Menu Iniciar e conclua o cadastro.        |" -ForegroundColor Green
-    Write-Host "|  2. No terminal Ubuntu, execute:                                 |" -ForegroundColor Green
-    Write-Host "|                                                                  |" -ForegroundColor Green
-    Write-Host "|     curl -fsSL https://openclaw.ai/install.sh | bash             |" -ForegroundColor Green
-    Write-Host "|     openclaw onboard --install-daemon                            |" -ForegroundColor Green
-    Write-Host "|                                                                  |" -ForegroundColor Green
-    Write-Host "|  Guia: https://docs.openclaw.ai/platforms/windows                |" -ForegroundColor Green
-    Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
-    Write-Host ""
+    Write-Host "  [$Step/$Total] $Message" -ForegroundColor Cyan
 }
 
-function Show-VirtualizationHelp {
+function Show-Ok    { param([string]$Msg); Write-Host "  [OK] $Msg" -ForegroundColor Green }
+function Show-Warn  { param([string]$Msg); Write-Host "  [!]  $Msg" -ForegroundColor Yellow }
+function Show-Fail  { param([string]$Msg); Write-Host "  [X] $Msg" -ForegroundColor Red }
+function Pause-End  { Write-Host ""; Write-Host "  Pressione qualquer tecla para fechar..."; $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") }
+
+# --- Passo 1: Verificar se o computador suporta virtualizacao -------------------
+
+Show-Progress 1 4 "Verificando se o computador suporta WSL2..."
+
+$cpu = Get-WmiObject Win32_Processor | Select-Object -First 1
+$virtEnabled = $cpu.VirtualizationFirmwareEnabled
+
+# Verifica se Virtual Machine Platform ja esta ativo
+$vmpFeature = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
+$vmpActive  = $vmpFeature -and $vmpFeature.State -eq "Enabled"
+
+if ($virtEnabled -eq $false) {
+    Show-Fail "A virtualizacao esta DESATIVADA no BIOS deste computador."
     Write-Host ""
-    Write-Host "+------------------------------------------------------------------+" -ForegroundColor Yellow
-    Write-Host "|  VIRTUALIZACAO NAO ESTA HABILITADA NESTE COMPUTADOR              |" -ForegroundColor Yellow
-    Write-Host "|                                                                  |" -ForegroundColor Yellow
-    Write-Host "|  Para usar WSL2, siga estes passos:                              |" -ForegroundColor Yellow
-    Write-Host "|                                                                  |" -ForegroundColor Yellow
-    Write-Host "|  PASSO 1 - Habilitar componentes Windows (requer Admin):         |" -ForegroundColor Yellow
-    Write-Host "|    Execute no PowerShell como Administrador:                     |" -ForegroundColor Yellow
-    Write-Host "|    dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart" -ForegroundColor Cyan
-    Write-Host "|    dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart" -ForegroundColor Cyan
-    Write-Host "|                                                                  |" -ForegroundColor Yellow
-    Write-Host "|  PASSO 2 - Habilitar virtualizacao no BIOS/UEFI:                 |" -ForegroundColor Yellow
-    Write-Host "|    Reinicie o PC e entre no BIOS (geralmente F2, F10, Del        |" -ForegroundColor Yellow
-    Write-Host "|    ou Esc durante o boot).                                       |" -ForegroundColor Yellow
-    Write-Host "|    Procure por: Intel VT-x, AMD-V, SVM Mode ou Virtualization    |" -ForegroundColor Yellow
-    Write-Host "|    Habilite e salve (F10).                                       |" -ForegroundColor Yellow
-    Write-Host "|                                                                  |" -ForegroundColor Yellow
-    Write-Host "|  PASSO 3 - Apos reiniciar, rode este script novamente.           |" -ForegroundColor Yellow
-    Write-Host "|                                                                  |" -ForegroundColor Yellow
-    Write-Host "|  Ref: https://aka.ms/enablevirtualization                        |" -ForegroundColor Yellow
-    Write-Host "+------------------------------------------------------------------+" -ForegroundColor Yellow
+    Write-Host "  Para ativar, siga estes 3 passos simples:" -ForegroundColor Yellow
     Write-Host ""
+    Write-Host "  PASSO 1: Reinicie o computador" -ForegroundColor White
+    Write-Host "           Assim que a tela apagar, pressione repetidamente" -ForegroundColor Gray
+    Write-Host "           a tecla F2, F10, F12, Del ou Esc (depende da marca)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  PASSO 2: Dentro do BIOS, procure por uma dessas opcoes:" -ForegroundColor White
+    Write-Host "           'Intel Virtualization Technology', 'AMD-V' ou 'SVM Mode'" -ForegroundColor Gray
+    Write-Host "           Mude para ENABLED (habilitado)" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  PASSO 3: Salve (geralmente F10) e reinicie o computador" -ForegroundColor White
+    Write-Host "           Depois, rode este instalador novamente" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  Referencia: https://aka.ms/enablevirtualization" -ForegroundColor DarkGray
+    Write-Host ""
+    Pause-End
+    exit 1
 }
 
-function Install-Wsl2AndExit {
-    Write-Step "Habilitando componentes do WSL2..."
+Show-Ok "Virtualizacao disponivel."
 
-    # Habilita os componentes Windows necessarios sem instalar distro ainda
-    $featureOut = & dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart 2>&1
-    $wslFeature = & dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart 2>&1
+# --- Passo 2: Habilitar componentes do Windows ----------------------------------
 
-    Write-Step "Instalando WSL2 + Ubuntu..."
-    $installOut = & wsl --install 2>&1
-    $installStr = $installOut -join "`n"
+Show-Progress 2 4 "Habilitando componentes necessarios do Windows..."
 
-    # Detecta erro de virtualizacao/Hyper-V
-    if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|virtualizacao|virtualization|VirtualMachinePlatform|HYPERV_NOT") {
-        Write-Fail "Virtualizacao nao esta habilitada neste computador."
-        Show-VirtualizationHelp
-        exit 1
-    }
+$needsReboot = $false
 
-    # Verifica outros erros fatais
-    if ($LASTEXITCODE -ne 0 -and $installStr -match "erro|error|failed|falha") {
-        Write-WarnMessage "wsl --install retornou avisos. Verifique se e necessario reiniciar."
-        Write-Host $installStr
-    }
+if (-not $vmpActive) {
+    Show-Warn "Habilitando 'Plataforma de Maquina Virtual'..."
+    dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart | Out-Null
+    $needsReboot = $true
+}
 
-    Show-WslNextSteps
-    Write-Host "REINICIE o Windows agora para concluir a instalacao do WSL2." -ForegroundColor Yellow
+$wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+if (-not ($wslFeature -and $wslFeature.State -eq "Enabled")) {
+    Show-Warn "Habilitando 'Subsistema do Windows para Linux'..."
+    dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart | Out-Null
+    $needsReboot = $true
+}
+
+if ($needsReboot) {
+    Show-Ok "Componentes habilitados. E necessario reiniciar o computador."
+    Write-Host ""
+    Write-Host "  O computador sera reiniciado em 30 segundos." -ForegroundColor Yellow
+    Write-Host "  Apos reiniciar, execute este instalador novamente para continuar." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Pressione ENTER para reiniciar agora ou feche para reiniciar manualmente."
+    Read-Host | Out-Null
+    Restart-Computer -Force
     exit 0
 }
 
-# --- instalar OpenClaw no WSL2 --------------------------------------------------
+Show-Ok "Componentes do Windows prontos."
 
-function Install-OpenClawInWsl {
-    $distro = Get-DefaultWslDistro
-    $distroArg = if ($distro) { @("-d", $distro) } else { @() }
+# --- Passo 3: Instalar o WSL2 + Ubuntu ------------------------------------------
 
-    Write-Step "Verificando systemd no WSL2..."
-    Enable-WslSystemd $distroArg
+Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-    Write-Step "Instalando OpenClaw dentro do WSL2..."
-    & wsl @distroArg -- bash -c "curl -fsSL https://openclaw.ai/install.sh | bash"
-    if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao instalar OpenClaw no WSL2 (exit code $LASTEXITCODE)."
-    }
-    Write-Ok "OpenClaw instalado no WSL2."
+$wslCheck = Get-Command wsl -ErrorAction SilentlyContinue
+$distroOk  = $false
 
-    if (-not $SkipOnboard) {
-        Write-Step "Executando onboarding no WSL2..."
-        & wsl @distroArg -- bash -c "openclaw onboard --install-daemon"
-    }
+if ($wslCheck) {
+    try {
+        $list = & wsl --list 2>&1
+        $distroOk = ($LASTEXITCODE -eq 0) -and ($list -match "Ubuntu|Debian|Kali")
+    } catch {}
 }
 
-# --- main -----------------------------------------------------------------------
+if (-not $distroOk) {
+    $installOut = & wsl --install 2>&1
+    $installStr = $installOut -join "`n"
 
-Write-Host ""
-Write-Host "  OpenClaw Installer para Windows via WSL2" -ForegroundColor Magenta
-Write-Host "  Guia oficial: https://docs.openclaw.ai/platforms/windows" -ForegroundColor DarkGray
-Write-Host ""
-
-if (Test-Wsl2Available) {
-    Write-Ok "WSL2 encontrado com distro instalada."
-    Install-OpenClawInWsl
-    Write-Ok "Concluido."
-}
-else {
-    Write-WarnMessage "WSL2 nao encontrado ou nenhuma distro instalada."
-    Write-Host ""
-    Write-Host "O OpenClaw requer WSL2 no Windows (o modo nativo tem um bug" -ForegroundColor Yellow
-    Write-Host "irrecuperavel do Node.js ESM: ERR_UNSUPPORTED_ESM_URL_SCHEME)." -ForegroundColor Yellow
-    Write-Host ""
-
-    $resp = Read-Host "Instalar WSL2 + Ubuntu agora? (s/n)"
-    if ($resp -match "^[sSyY]") {
-        Install-Wsl2AndExit
-    }
-    else {
-        Write-Fail "Instalacao cancelada. Instale o WSL2 manualmente e rode o script novamente."
-        Write-Host "  wsl --install" -ForegroundColor Cyan
-        Write-Host "  https://docs.openclaw.ai/platforms/windows" -ForegroundColor Cyan
+    if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
+        Show-Fail "Erro: Hyper-V nao esta disponivel."
+        Show-Warn "Verifique se a virtualizacao esta ativa no BIOS (passo 1) e tente novamente."
+        Pause-End
         exit 1
     }
+
+    Show-Ok "WSL2 instalado. Pode ser necessario reiniciar."
+
+    # Verifica se precisa reiniciar
+    if ($installStr -match "reinici|reboot|restart") {
+        Write-Host ""
+        Write-Host "  O computador sera reiniciado para concluir a instalacao." -ForegroundColor Yellow
+        Write-Host "  Apos reiniciar, execute este instalador novamente para instalar o OpenClaw." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Pressione ENTER para reiniciar."
+        Read-Host | Out-Null
+        Restart-Computer -Force
+        exit 0
+    }
+} else {
+    Show-Ok "WSL2 com Ubuntu ja instalado."
 }
-Write-Ok "Finalizado."
+
+# --- Passo 4: Instalar o OpenClaw dentro do WSL2 --------------------------------
+
+Show-Progress 4 4 "Instalando OpenClaw..."
+
+# Habilita systemd (necessario para o daemon do OpenClaw)
+$wslConf = & wsl -- cat /etc/wsl.conf 2>&1
+if ($wslConf -notmatch "systemd=true") {
+    & wsl -- bash -c "printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf > /dev/null"
+    & wsl --shutdown
+    Start-Sleep -Seconds 4
+}
+
+# Instala o OpenClaw
+& wsl -- bash -c "curl -fsSL https://openclaw.ai/install.sh | bash"
+
+if ($LASTEXITCODE -ne 0) {
+    Show-Fail "Erro ao instalar o OpenClaw. Tente novamente."
+    Pause-End
+    exit 1
+}
+
+Show-Ok "OpenClaw instalado com sucesso!"
+
+# --- Configuracao inicial -------------------------------------------------------
+
+Write-Host ""
+Write-Host "  ================================================" -ForegroundColor Green
+Write-Host "    OpenClaw instalado! Vamos configurar agora." -ForegroundColor Green
+Write-Host "  ================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  O assistente de configuracao vai abrir." -ForegroundColor White
+Write-Host "  Ele vai pedir sua chave de API (ex: Anthropic, Google, OpenAI)." -ForegroundColor White
+Write-Host ""
+Write-Host "  Pressione ENTER para comecar a configuracao."
+Read-Host | Out-Null
+
+& wsl -- bash -c "openclaw onboard --install-daemon"
+
+Write-Host ""
+Write-Host "  ================================================" -ForegroundColor Green
+Write-Host "    Pronto! OpenClaw esta funcionando." -ForegroundColor Green
+Write-Host "  ================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Para usar o OpenClaw novamente, abra o Ubuntu" -ForegroundColor White
+Write-Host "  pelo Menu Iniciar e digite: openclaw" -ForegroundColor Cyan
+Write-Host ""
+Pause-End
