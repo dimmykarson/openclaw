@@ -64,12 +64,10 @@ function Enable-WslSystemd {
 
 # --- instalar WSL2 --------------------------------------------------------------
 
-function Install-Wsl2AndExit {
-    Write-Step "Instalando WSL2 + Ubuntu (requer reinicializacao)..."
-    wsl --install
+function Show-WslNextSteps {
     Write-Host ""
     Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
-    Write-Host "|  Proximo passo apos reiniciar o Windows:                         |" -ForegroundColor Green
+    Write-Host "|  Apos reiniciar o Windows:                                       |" -ForegroundColor Green
     Write-Host "|                                                                  |" -ForegroundColor Green
     Write-Host "|  1. Abra o Ubuntu pelo Menu Iniciar e conclua o cadastro.        |" -ForegroundColor Green
     Write-Host "|  2. No terminal Ubuntu, execute:                                 |" -ForegroundColor Green
@@ -80,6 +78,58 @@ function Install-Wsl2AndExit {
     Write-Host "|  Guia: https://docs.openclaw.ai/platforms/windows                |" -ForegroundColor Green
     Write-Host "+------------------------------------------------------------------+" -ForegroundColor Green
     Write-Host ""
+}
+
+function Show-VirtualizationHelp {
+    Write-Host ""
+    Write-Host "+------------------------------------------------------------------+" -ForegroundColor Yellow
+    Write-Host "|  VIRTUALIZACAO NAO ESTA HABILITADA NESTE COMPUTADOR              |" -ForegroundColor Yellow
+    Write-Host "|                                                                  |" -ForegroundColor Yellow
+    Write-Host "|  Para usar WSL2, siga estes passos:                              |" -ForegroundColor Yellow
+    Write-Host "|                                                                  |" -ForegroundColor Yellow
+    Write-Host "|  PASSO 1 - Habilitar componentes Windows (requer Admin):         |" -ForegroundColor Yellow
+    Write-Host "|    Execute no PowerShell como Administrador:                     |" -ForegroundColor Yellow
+    Write-Host "|    dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart" -ForegroundColor Cyan
+    Write-Host "|    dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart" -ForegroundColor Cyan
+    Write-Host "|                                                                  |" -ForegroundColor Yellow
+    Write-Host "|  PASSO 2 - Habilitar virtualizacao no BIOS/UEFI:                 |" -ForegroundColor Yellow
+    Write-Host "|    Reinicie o PC e entre no BIOS (geralmente F2, F10, Del        |" -ForegroundColor Yellow
+    Write-Host "|    ou Esc durante o boot).                                       |" -ForegroundColor Yellow
+    Write-Host "|    Procure por: Intel VT-x, AMD-V, SVM Mode ou Virtualization    |" -ForegroundColor Yellow
+    Write-Host "|    Habilite e salve (F10).                                       |" -ForegroundColor Yellow
+    Write-Host "|                                                                  |" -ForegroundColor Yellow
+    Write-Host "|  PASSO 3 - Apos reiniciar, rode este script novamente.           |" -ForegroundColor Yellow
+    Write-Host "|                                                                  |" -ForegroundColor Yellow
+    Write-Host "|  Ref: https://aka.ms/enablevirtualization                        |" -ForegroundColor Yellow
+    Write-Host "+------------------------------------------------------------------+" -ForegroundColor Yellow
+    Write-Host ""
+}
+
+function Install-Wsl2AndExit {
+    Write-Step "Habilitando componentes do WSL2..."
+
+    # Habilita os componentes Windows necessarios sem instalar distro ainda
+    $featureOut = & dism /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart 2>&1
+    $wslFeature = & dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart 2>&1
+
+    Write-Step "Instalando WSL2 + Ubuntu..."
+    $installOut = & wsl --install 2>&1
+    $installStr = $installOut -join "`n"
+
+    # Detecta erro de virtualizacao/Hyper-V
+    if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|virtualizacao|virtualization|VirtualMachinePlatform|HYPERV_NOT") {
+        Write-Fail "Virtualizacao nao esta habilitada neste computador."
+        Show-VirtualizationHelp
+        exit 1
+    }
+
+    # Verifica outros erros fatais
+    if ($LASTEXITCODE -ne 0 -and $installStr -match "erro|error|failed|falha") {
+        Write-WarnMessage "wsl --install retornou avisos. Verifique se e necessario reiniciar."
+        Write-Host $installStr
+    }
+
+    Show-WslNextSteps
     Write-Host "REINICIE o Windows agora para concluir a instalacao do WSL2." -ForegroundColor Yellow
     exit 0
 }
