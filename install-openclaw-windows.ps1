@@ -116,17 +116,11 @@ Show-Ok "Componentes do Windows prontos."
 
 Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-# Detecta pelo registro do Windows se o Ubuntu esta instalado
-# (mais confiavel que wsl --list que tem bug de encoding UTF-16)
-function Test-UbuntuNoRegistro {
-    $lxss = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss"
-    if (-not (Test-Path $lxss)) { return $false }
-    $found = Get-ChildItem $lxss -ErrorAction SilentlyContinue | Where-Object {
-        try { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DistributionName -match "Ubuntu" }
-        catch { $false }
-    }
-    return ($null -ne $found -and @($found).Count -gt 0)
-}
+# Usa um arquivo de estado para saber exatamente onde parou
+# (mais confiavel que tentar detectar o estado do WSL via registro ou encoding)
+$stateFile = "$env:TEMP\openclaw_install_state.txt"
+$state = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { "" }
+$state = $state.Trim()
 
 # Verifica se o kernel do WSL2 esta instalado
 $kernelOk = $false
@@ -135,10 +129,8 @@ try {
     $kernelOk = ($LASTEXITCODE -eq 0)
 } catch {}
 
-$ubuntuOk = Test-UbuntuNoRegistro
-
 if (-not $kernelOk) {
-    # Caso 1: instala kernel + Ubuntu e reinicia
+    # Caso 1: instala kernel + Ubuntu
     $installOut = & wsl --install 2>&1
     $installStr = $installOut -join "`n"
 
@@ -149,6 +141,7 @@ if (-not $kernelOk) {
         exit 1
     }
 
+    "kernel_installed" | Set-Content $stateFile
     Show-Ok "WSL2 instalado. O computador precisa reiniciar para concluir."
     Write-Host ""
     Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
@@ -159,11 +152,12 @@ if (-not $kernelOk) {
     Restart-Computer -Force
     exit 0
 
-} elseif (-not $ubuntuOk) {
-    # Caso 2: kernel ok mas Ubuntu nao registrado - instala e reinicia
+} elseif ($state -ne "ubuntu_installed") {
+    # Caso 2: kernel ok mas Ubuntu ainda nao confirmado como instalado
     Show-Warn "Instalando Ubuntu..."
     & wsl --install -d Ubuntu 2>&1 | Out-Null
 
+    "ubuntu_installed" | Set-Content $stateFile
     Show-Ok "Ubuntu instalado. O computador precisa reiniciar para concluir."
     Write-Host ""
     Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
