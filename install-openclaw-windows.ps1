@@ -116,23 +116,6 @@ Show-Ok "Componentes do Windows prontos."
 
 Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-# Le saida de wsl --list com encoding correto (UTF-16LE - PowerShell nao faz isso sozinho)
-function Get-WslListText {
-    try {
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = "wsl.exe"
-        $psi.Arguments = "--list"
-        $psi.RedirectStandardOutput = $true
-        $psi.UseShellExecute = $false
-        $psi.StandardOutputEncoding = [System.Text.Encoding]::Unicode
-        $psi.CreateNoWindow = $true
-        $proc = [System.Diagnostics.Process]::Start($psi)
-        $out = $proc.StandardOutput.ReadToEnd()
-        $proc.WaitForExit()
-        return $out
-    } catch { return "" }
-}
-
 function Test-KernelOk {
     try { & wsl --version 2>&1 | Out-Null; return ($LASTEXITCODE -eq 0) }
     catch { return $false }
@@ -143,44 +126,69 @@ function Test-WslFuncional {
     catch { return $false }
 }
 
-if (Test-WslFuncional) {
-    Show-Ok "WSL2 com Ubuntu pronto."
-} else {
-    if (-not (Test-KernelOk)) {
-        # Instala kernel + Ubuntu juntos
-        $out = & wsl --install -d Ubuntu 2>&1
-        if (($out -join "`n") -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
-            Show-Fail "Erro: Hyper-V nao esta disponivel."
-            Show-Warn "Verifique se a virtualizacao esta ativa no BIOS e tente novamente."
-            Pause-End; exit 1
-        }
-        Show-Ok "WSL2 instalado."
-    } elseif ((Get-WslListText) -notmatch "Ubuntu") {
-        # Kernel ok mas sem distro
-        Show-Warn "Instalando Ubuntu..."
-        & wsl --install -d Ubuntu 2>&1 | Out-Null
-        Show-Ok "Ubuntu instalado."
-    } else {
-        # Ubuntu registrado mas nao respondendo - inicializa com timeout de 2 minutos
-        Show-Warn "Inicializando Ubuntu pela primeira vez (aguarde ate 2 minutos)..."
-        $proc = Start-Process -FilePath "wsl.exe" -ArgumentList "--user root -- /bin/sh -c exit" -PassThru -WindowStyle Hidden
-        $proc.WaitForExit(120000) | Out-Null
+function Get-UbuntuExe {
+    # Procura ubuntu*.exe nos caminhos padrao do Windows
+    foreach ($n in @("ubuntu", "ubuntu2404", "ubuntu2204", "ubuntu2004")) {
+        $c = Get-Command "$n.exe" -ErrorAction SilentlyContinue
+        if ($c) { return $c.Source }
+    }
+    $f = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WindowsApps" -Filter "ubuntu*.exe" -EA SilentlyContinue | Select-Object -First 1
+    if ($f) { return $f.FullName }
+    return $null
+}
+
+if (-not (Test-KernelOk)) {
+    # Kernel WSL2 nao instalado - instala e reinicia
+    $out = & wsl --install 2>&1
+    if (($out -join "`n") -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
+        Show-Fail "Erro: Hyper-V nao esta disponivel."
+        Show-Warn "Verifique se a virtualizacao esta ativa no BIOS e tente novamente."
+        Pause-End; exit 1
+    }
+    Show-Ok "WSL2 instalado. O computador precisa reiniciar."
+    Write-Host "  Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Pressione ENTER para reiniciar agora."
+    Read-Host | Out-Null
+    Restart-Computer -Force; exit 0
+}
+
+# Detecta Ubuntu via AppxPackage - funciona mesmo de processo elevado
+# (ao contrario de 'wsl --list' que tem bug de encoding + nao ve distros do usuario)
+$ubuntuPkg = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*Ubuntu*" }
+
+if (-not $ubuntuPkg) {
+    Show-Warn "Instalando Ubuntu..."
+    & wsl --install -d Ubuntu 2>&1 | Out-Null
+    Start-Sleep -Seconds 5
+    $ubuntuPkg = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*Ubuntu*" }
+}
+
+# Ubuntu instalado como AppX mas ainda nao inicializado
+# Usa 'ubuntu.exe install --root' para inicializar SEM pedir usuario/senha
+if ($ubuntuPkg -and -not (Test-WslFuncional)) {
+    $ubuntuExe = Get-UbuntuExe
+    if ($ubuntuExe) {
+        Show-Warn "Configurando Ubuntu pela primeira vez (ate 2 minutos)..."
+        $proc = Start-Process -FilePath $ubuntuExe -ArgumentList "install --root" -PassThru -WindowStyle Hidden
+        $proc.WaitForExit(180000) | Out-Null
         if (-not $proc.HasExited) { $proc.Kill() }
         & wsl --shutdown 2>&1 | Out-Null
         Start-Sleep -Seconds 3
     }
+}
 
-    if (-not (Test-WslFuncional)) {
-        Write-Host ""
-        Write-Host "  O computador precisa reiniciar para concluir a instalacao." -ForegroundColor Yellow
-        Write-Host "  Apos reiniciar, execute este instalador mais UMA vez." -ForegroundColor Yellow
-        Write-Host ""
-        Write-Host "  Pressione ENTER para reiniciar agora."
-        Read-Host | Out-Null
-        Restart-Computer -Force
-        exit 0
-    }
+if (Test-WslFuncional) {
     Show-Ok "WSL2 com Ubuntu pronto."
+} else {
+    Show-Ok "Ubuntu instalado. O computador precisa reiniciar."
+    Write-Host ""
+    Write-Host "  Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
+    Write-Host "  Sera a ultima reinicializacao - o OpenClaw sera instalado logo depois." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Pressione ENTER para reiniciar agora."
+    Read-Host | Out-Null
+    Restart-Computer -Force; exit 0
 }
 
 # --- Passo 4: Instalar o OpenClaw dentro do WSL2 --------------------------------
