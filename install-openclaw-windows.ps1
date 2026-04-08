@@ -32,8 +32,15 @@ function Write-ErrorMessage {
 function Test-Wsl2Available {
     $wsl = Get-Command wsl -ErrorAction SilentlyContinue
     if (-not $wsl) { return $false }
-    $list = wsl --list --verbose 2>&1
-    return ($list -match "Running|Stopped")
+    try {
+        $list = & wsl --list --verbose 2>&1
+        # wsl nao instalado retorna exit code != 0 ou mensagem de erro
+        if ($LASTEXITCODE -ne 0) { return $false }
+        return ($list -match "Running|Stopped")
+    }
+    catch {
+        return $false
+    }
 }
 
 function Install-Wsl2 {
