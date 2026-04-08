@@ -177,15 +177,15 @@ if (-not $kernelOk) {
 Show-Progress 4 4 "Instalando OpenClaw..."
 
 # Habilita systemd usando root (evita necessidade de configuracao inicial do Ubuntu)
-$wslConf = & wsl -d Ubuntu --user root -- cat /etc/wsl.conf 2>&1
+$wslConf = & wsl --user root -- cat /etc/wsl.conf 2>&1
 if ("$wslConf" -notmatch "systemd=true") {
-    & wsl -d Ubuntu --user root -- bash -c "printf '[boot]\nsystemd=true\n' > /etc/wsl.conf"
+    & wsl --user root -- bash -c "printf '[boot]\nsystemd=true\n' > /etc/wsl.conf"
     & wsl --shutdown
     Start-Sleep -Seconds 4
 }
 
 # Instala o OpenClaw (HTTPS garante autenticidade do servidor)
-& wsl -d Ubuntu --user root -- bash -c "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash"
+& wsl --user root -- bash -c "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash"
 
 if ($LASTEXITCODE -ne 0) {
     Show-Fail "Erro ao instalar o OpenClaw. Tente novamente."
@@ -208,7 +208,7 @@ Write-Host ""
 Write-Host "  Pressione ENTER para comecar a configuracao."
 Read-Host | Out-Null
 
-& wsl -d Ubuntu --user root -- bash -c "openclaw onboard --install-daemon"
+& wsl --user root -- bash -c "openclaw onboard --install-daemon"
 
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Green
