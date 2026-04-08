@@ -116,21 +116,28 @@ Show-Ok "Componentes do Windows prontos."
 
 Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-# Usa um arquivo de estado para saber exatamente onde parou
-# (mais confiavel que tentar detectar o estado do WSL via registro ou encoding)
-$stateFile = "$env:TEMP\openclaw_install_state.txt"
-$state = if (Test-Path $stateFile) { Get-Content $stateFile -Raw } else { "" }
-$state = $state.Trim()
+# Teste definitivo: tenta executar um comando real como root
+# /bin/true sempre retorna 0 e nao pede input - confirma que o WSL esta funcional
+function Test-WslFuncional {
+    try {
+        & wsl --user root -- /bin/true 2>&1 | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
 
 # Verifica se o kernel do WSL2 esta instalado
-$kernelOk = $false
-try {
-    & wsl --version 2>&1 | Out-Null
-    $kernelOk = ($LASTEXITCODE -eq 0)
-} catch {}
+function Test-KernelOk {
+    try {
+        & wsl --version 2>&1 | Out-Null
+        return ($LASTEXITCODE -eq 0)
+    } catch { return $false }
+}
 
-if (-not $kernelOk) {
-    # Caso 1: instala kernel + Ubuntu
+if (Test-WslFuncional) {
+    Show-Ok "WSL2 com Ubuntu pronto."
+
+} elseif (-not (Test-KernelOk)) {
+    # Caso 1: kernel nao instalado - instala tudo e reinicia
     $installOut = & wsl --install 2>&1
     $installStr = $installOut -join "`n"
 
@@ -141,27 +148,10 @@ if (-not $kernelOk) {
         exit 1
     }
 
-    "kernel_installed" | Set-Content $stateFile
     Show-Ok "WSL2 instalado. O computador precisa reiniciar para concluir."
     Write-Host ""
-    Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
-    Write-Host "  Na proxima vez ele instala o OpenClaw direto, sem mais reinicializacoes." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Pressione ENTER para reiniciar agora."
-    Read-Host | Out-Null
-    Restart-Computer -Force
-    exit 0
-
-} elseif ($state -ne "ubuntu_installed") {
-    # Caso 2: kernel ok mas Ubuntu ainda nao confirmado como instalado
-    Show-Warn "Instalando Ubuntu..."
-    & wsl --install -d Ubuntu 2>&1 | Out-Null
-
-    "ubuntu_installed" | Set-Content $stateFile
-    Show-Ok "Ubuntu instalado. O computador precisa reiniciar para concluir."
-    Write-Host ""
-    Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
-    Write-Host "  Na proxima vez ele instala o OpenClaw direto, sem mais reinicializacoes." -ForegroundColor Yellow
+    Write-Host "  Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
+    Write-Host "  Sera o ultimo reinicio - depois o OpenClaw sera instalado." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Pressione ENTER para reiniciar agora."
     Read-Host | Out-Null
@@ -169,7 +159,29 @@ if (-not $kernelOk) {
     exit 0
 
 } else {
-    Show-Ok "WSL2 com Ubuntu pronto."
+    # Caso 2: kernel ok mas sem distro funcional - instala Ubuntu e inicializa
+    Show-Warn "Instalando Ubuntu..."
+    & wsl --install -d Ubuntu 2>&1 | Out-Null
+    Start-Sleep -Seconds 5
+
+    # Forca a inicializacao do filesystem da distro como root
+    Show-Warn "Inicializando Ubuntu..."
+    & wsl --user root -- /bin/sh -c "echo iniciado" 2>&1 | Out-Null
+
+    if (-not (Test-WslFuncional)) {
+        # Ainda nao funciona - precisa de reboot
+        Show-Ok "Ubuntu instalado. O computador precisa reiniciar para concluir."
+        Write-Host ""
+        Write-Host "  Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
+        Write-Host "  Sera o ultimo reinicio - depois o OpenClaw sera instalado." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Pressione ENTER para reiniciar agora."
+        Read-Host | Out-Null
+        Restart-Computer -Force
+        exit 0
+    }
+
+    Show-Ok "Ubuntu instalado e pronto."
 }
 
 # --- Passo 4: Instalar o OpenClaw dentro do WSL2 --------------------------------
