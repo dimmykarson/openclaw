@@ -116,17 +116,27 @@ Show-Ok "Componentes do Windows prontos."
 
 Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-$wslCheck = Get-Command wsl -ErrorAction SilentlyContinue
+# Verifica se o kernel do WSL2 ja esta funcionando
+$wslReady = $false
 $distroOk  = $false
 
-if ($wslCheck) {
+if (Get-Command wsl -ErrorAction SilentlyContinue) {
     try {
-        $list = & wsl --list 2>&1
-        $distroOk = ($LASTEXITCODE -eq 0) -and ($list -match "Ubuntu|Debian|Kali")
+        & wsl --version 2>&1 | Out-Null
+        $wslReady = ($LASTEXITCODE -eq 0)
     } catch {}
 }
 
-if (-not $distroOk) {
+if ($wslReady) {
+    try {
+        # wsl --list usa UTF-16 - remove bytes nulos antes de comparar
+        $list = (& wsl --list --quiet 2>&1) -join "" -replace "`0", ""
+        $distroOk = ($LASTEXITCODE -eq 0) -and ($list.Trim() -ne "")
+    } catch {}
+}
+
+if (-not $wslReady) {
+    # Caso 1: WSL2 ainda nao instalado - instala e reinicia
     $installOut = & wsl --install 2>&1
     $installStr = $installOut -join "`n"
 
@@ -140,12 +150,19 @@ if (-not $distroOk) {
     Show-Ok "WSL2 instalado. O computador precisa reiniciar para concluir."
     Write-Host ""
     Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
-    Write-Host "  O instalador vai continuar automaticamente de onde parou." -ForegroundColor Yellow
+    Write-Host "  Desta vez ele vai continuar direto para instalar o OpenClaw." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Pressione ENTER para reiniciar agora."
     Read-Host | Out-Null
     Restart-Computer -Force
     exit 0
+
+} elseif (-not $distroOk) {
+    # Caso 2: WSL2 pronto mas sem distro - instala so o Ubuntu (sem reiniciar)
+    Show-Warn "Instalando Ubuntu..."
+    & wsl --install -d Ubuntu 2>&1 | Out-Null
+    Show-Ok "Ubuntu instalado."
+
 } else {
     Show-Ok "WSL2 com Ubuntu ja instalado."
 }
