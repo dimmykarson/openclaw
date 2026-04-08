@@ -22,6 +22,8 @@ Write-Host "  Isso pode levar alguns minutos. Nao feche esta janela." -Foregroun
 Write-Host ""
 Write-Host "  Pressione ENTER para comecar ou feche a janela para cancelar."
 Read-Host | Out-Null
+Write-Host ""
+Write-Host "  Iniciando verificacoes..." -ForegroundColor Gray
 
 # --- Funcoes de status ----------------------------------------------------------
 
@@ -40,13 +42,19 @@ function Pause-End  { Write-Host ""; Write-Host "  Pressione qualquer tecla para
 
 Show-Progress 1 4 "Verificando se o computador suporta WSL2..."
 
-$cpu = Get-WmiObject Win32_Processor | Select-Object -First 1
-$virtEnabled = $cpu.VirtualizationFirmwareEnabled
+try {
+    $cpu = Get-WmiObject Win32_Processor | Select-Object -First 1
+    $virtEnabled = $cpu.VirtualizationFirmwareEnabled
+} catch {
+    # Nao foi possivel ler via WMI (comum em VMs) - assume que esta habilitado
+    $virtEnabled = $null
+}
 
 # Verifica se Virtual Machine Platform ja esta ativo
 $vmpFeature = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
 $vmpActive  = $vmpFeature -and $vmpFeature.State -eq "Enabled"
 
+# Trata $false explicitamente - $null significa 'nao foi possivel verificar' (nao bloqueia)
 if ($virtEnabled -eq $false) {
     Show-Fail "A virtualizacao esta DESATIVADA no BIOS deste computador."
     Write-Host ""
@@ -158,8 +166,8 @@ if ($wslConf -notmatch "systemd=true") {
     Start-Sleep -Seconds 4
 }
 
-# Instala o OpenClaw
-& wsl -- bash -c "curl -fsSL https://openclaw.ai/install.sh | bash"
+# Instala o OpenClaw (HTTPS garante autenticidade do servidor)
+& wsl -- bash -c "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash"
 
 if ($LASTEXITCODE -ne 0) {
     Show-Fail "Erro ao instalar o OpenClaw. Tente novamente."
