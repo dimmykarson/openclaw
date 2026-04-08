@@ -116,40 +116,55 @@ Show-Ok "Componentes do Windows prontos."
 
 Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-# O teste mais confiavel: tenta rodar um comando dentro do WSL
-# Se funcionar, tudo esta pronto. Se falhar, precisa instalar/reiniciar.
-$wslFuncional = $false
+# Detecta pelo registro do Windows se o Ubuntu esta instalado
+# (mais confiavel que wsl --list que tem bug de encoding UTF-16)
+function Test-UbuntuNoRegistro {
+    $lxss = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss"
+    if (-not (Test-Path $lxss)) { return $false }
+    $found = Get-ChildItem $lxss -ErrorAction SilentlyContinue | Where-Object {
+        try { (Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue).DistributionName -match "Ubuntu" }
+        catch { $false }
+    }
+    return ($null -ne $found -and @($found).Count -gt 0)
+}
+
+# Verifica se o kernel do WSL2 esta instalado
+$kernelOk = $false
 try {
-    $testOut = & wsl -- echo "wsl_ok" 2>&1
-    $wslFuncional = ($LASTEXITCODE -eq 0) -and ("$testOut" -match "wsl_ok")
+    & wsl --version 2>&1 | Out-Null
+    $kernelOk = ($LASTEXITCODE -eq 0)
 } catch {}
 
-if (-not $wslFuncional) {
-    # Verifica se o kernel do WSL2 ja existe
-    $kernelOk = $false
-    try {
-        & wsl --version 2>&1 | Out-Null
-        $kernelOk = ($LASTEXITCODE -eq 0)
-    } catch {}
+$ubuntuOk = Test-UbuntuNoRegistro
 
-    if (-not $kernelOk) {
-        # Instala kernel + Ubuntu e reinicia
-        $installOut = & wsl --install 2>&1
-        $installStr = $installOut -join "`n"
+if (-not $kernelOk) {
+    # Caso 1: instala kernel + Ubuntu e reinicia
+    $installOut = & wsl --install 2>&1
+    $installStr = $installOut -join "`n"
 
-        if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
-            Show-Fail "Erro: Hyper-V nao esta disponivel."
-            Show-Warn "Verifique se a virtualizacao esta ativa no BIOS (passo 1) e tente novamente."
-            Pause-End
-            exit 1
-        }
-    } else {
-        # Kernel ok mas Ubuntu nao responde - instala a distro
-        Show-Warn "Instalando Ubuntu..."
-        & wsl --install -d Ubuntu 2>&1 | Out-Null
+    if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
+        Show-Fail "Erro: Hyper-V nao esta disponivel."
+        Show-Warn "Verifique se a virtualizacao esta ativa no BIOS (passo 1) e tente novamente."
+        Pause-End
+        exit 1
     }
 
     Show-Ok "WSL2 instalado. O computador precisa reiniciar para concluir."
+    Write-Host ""
+    Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
+    Write-Host "  Na proxima vez ele instala o OpenClaw direto, sem mais reinicializacoes." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Pressione ENTER para reiniciar agora."
+    Read-Host | Out-Null
+    Restart-Computer -Force
+    exit 0
+
+} elseif (-not $ubuntuOk) {
+    # Caso 2: kernel ok mas Ubuntu nao registrado - instala e reinicia
+    Show-Warn "Instalando Ubuntu..."
+    & wsl --install -d Ubuntu 2>&1 | Out-Null
+
+    Show-Ok "Ubuntu instalado. O computador precisa reiniciar para concluir."
     Write-Host ""
     Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
     Write-Host "  Na proxima vez ele instala o OpenClaw direto, sem mais reinicializacoes." -ForegroundColor Yellow
@@ -167,16 +182,16 @@ if (-not $wslFuncional) {
 
 Show-Progress 4 4 "Instalando OpenClaw..."
 
-# Habilita systemd (necessario para o daemon do OpenClaw)
-$wslConf = & wsl -- cat /etc/wsl.conf 2>&1
-if ($wslConf -notmatch "systemd=true") {
-    & wsl -- bash -c "printf '[boot]\nsystemd=true\n' | sudo tee /etc/wsl.conf > /dev/null"
+# Habilita systemd usando root (evita necessidade de configuracao inicial do Ubuntu)
+$wslConf = & wsl -d Ubuntu --user root -- cat /etc/wsl.conf 2>&1
+if ("$wslConf" -notmatch "systemd=true") {
+    & wsl -d Ubuntu --user root -- bash -c "printf '[boot]\nsystemd=true\n' > /etc/wsl.conf"
     & wsl --shutdown
     Start-Sleep -Seconds 4
 }
 
 # Instala o OpenClaw (HTTPS garante autenticidade do servidor)
-& wsl -- bash -c "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash"
+& wsl -d Ubuntu --user root -- bash -c "curl -fsSL --proto '=https' --tlsv1.2 https://openclaw.ai/install.sh | bash"
 
 if ($LASTEXITCODE -ne 0) {
     Show-Fail "Erro ao instalar o OpenClaw. Tente novamente."
@@ -199,7 +214,7 @@ Write-Host ""
 Write-Host "  Pressione ENTER para comecar a configuracao."
 Read-Host | Out-Null
 
-& wsl -- bash -c "openclaw onboard --install-daemon"
+& wsl -d Ubuntu --user root -- bash -c "openclaw onboard --install-daemon"
 
 Write-Host ""
 Write-Host "  ================================================" -ForegroundColor Green
