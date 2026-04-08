@@ -116,55 +116,43 @@ Show-Ok "Componentes do Windows prontos."
 
 Show-Progress 3 4 "Instalando WSL2 + Ubuntu (pode demorar alguns minutos)..."
 
-# Verifica se o kernel do WSL2 ja esta funcionando
-$wslReady = $false
-$distroOk  = $false
+# O teste mais confiavel: tenta rodar um comando dentro do WSL
+# Se funcionar, tudo esta pronto. Se falhar, precisa instalar/reiniciar.
+$wslFuncional = $false
+try {
+    $testOut = & wsl -- echo "wsl_ok" 2>&1
+    $wslFuncional = ($LASTEXITCODE -eq 0) -and ("$testOut" -match "wsl_ok")
+} catch {}
 
-if (Get-Command wsl -ErrorAction SilentlyContinue) {
+if (-not $wslFuncional) {
+    # Verifica se o kernel do WSL2 ja existe
+    $kernelOk = $false
     try {
         & wsl --version 2>&1 | Out-Null
-        $wslReady = ($LASTEXITCODE -eq 0)
+        $kernelOk = ($LASTEXITCODE -eq 0)
     } catch {}
-}
 
-if ($wslReady) {
-    try {
-        # wsl --list usa UTF-16 - remove bytes nulos antes de comparar
-        $list = (& wsl --list --quiet 2>&1) -join "" -replace "`0", ""
-        $distroOk = ($LASTEXITCODE -eq 0) -and ($list.Trim() -ne "")
-    } catch {}
-}
+    if (-not $kernelOk) {
+        # Instala kernel + Ubuntu e reinicia
+        $installOut = & wsl --install 2>&1
+        $installStr = $installOut -join "`n"
 
-if (-not $wslReady) {
-    # Caso 1: WSL2 ainda nao instalado - instala e reinicia
-    $installOut = & wsl --install 2>&1
-    $installStr = $installOut -join "`n"
-
-    if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
-        Show-Fail "Erro: Hyper-V nao esta disponivel."
-        Show-Warn "Verifique se a virtualizacao esta ativa no BIOS (passo 1) e tente novamente."
-        Pause-End
-        exit 1
+        if ($installStr -match "HCS_E_HYPERV_NOT_INSTALLED|HYPERV_NOT") {
+            Show-Fail "Erro: Hyper-V nao esta disponivel."
+            Show-Warn "Verifique se a virtualizacao esta ativa no BIOS (passo 1) e tente novamente."
+            Pause-End
+            exit 1
+        }
+    } else {
+        # Kernel ok mas Ubuntu nao responde - instala a distro
+        Show-Warn "Instalando Ubuntu..."
+        & wsl --install -d Ubuntu 2>&1 | Out-Null
     }
 
     Show-Ok "WSL2 instalado. O computador precisa reiniciar para concluir."
     Write-Host ""
     Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
-    Write-Host "  Desta vez ele vai continuar direto para instalar o OpenClaw." -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  Pressione ENTER para reiniciar agora."
-    Read-Host | Out-Null
-    Restart-Computer -Force
-    exit 0
-
-} elseif (-not $distroOk) {
-    # Caso 2: WSL2 pronto mas sem distro - instala Ubuntu e reinicia
-    Show-Warn "Instalando Ubuntu..."
-    & wsl --install -d Ubuntu 2>&1 | Out-Null
-    Show-Ok "Ubuntu instalado. O computador precisa reiniciar para concluir."
-    Write-Host ""
-    Write-Host "  IMPORTANTE: Apos reiniciar, execute este instalador novamente." -ForegroundColor Yellow
-    Write-Host "  Desta vez ele vai instalar o OpenClaw direto, sem mais reinicializacoes." -ForegroundColor Yellow
+    Write-Host "  Na proxima vez ele instala o OpenClaw direto, sem mais reinicializacoes." -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Pressione ENTER para reiniciar agora."
     Read-Host | Out-Null
@@ -172,7 +160,7 @@ if (-not $wslReady) {
     exit 0
 
 } else {
-    Show-Ok "WSL2 com Ubuntu ja instalado."
+    Show-Ok "WSL2 com Ubuntu pronto."
 }
 
 # --- Passo 4: Instalar o OpenClaw dentro do WSL2 --------------------------------
