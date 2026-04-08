@@ -27,7 +27,7 @@ function Write-ErrorMessage {
     Write-Host "[ERRO] $Message" -ForegroundColor Red
 }
 
-# ─── WSL2 ────────────────────────────────────────────────────────────────────
+# --- WSL2 -----------------------------------------------------------------------
 
 function Test-Wsl2Available {
     $wsl = Get-Command wsl -ErrorAction SilentlyContinue
@@ -41,18 +41,18 @@ function Install-Wsl2 {
     wsl --install
     Write-Host @"
 
-╔══════════════════════════════════════════════════════════════╗
-║  WSL2 instalado. Siga estes passos:                          ║
-║                                                              ║
-║  1. REINICIE o Windows quando solicitado.                    ║
-║  2. Abra o Ubuntu pelo Menu Iniciar e crie seu usuário.      ║
-║  3. No terminal Ubuntu, rode:                                ║
-║                                                              ║
-║     curl -fsSL https://openclaw.ai/install.sh | bash         ║
-║     openclaw onboard --install-daemon                        ║
-║                                                              ║
-║  Guia completo: https://docs.openclaw.ai/platforms/windows   ║
-╚══════════════════════════════════════════════════════════════╝
++--------------------------------------------------------------+
+|  WSL2 instalado. Siga estes passos:                          |
+|                                                              |
+|  1. REINICIE o Windows quando solicitado.                    |
+|  2. Abra o Ubuntu pelo Menu Iniciar e crie seu usuario.      |
+|  3. No terminal Ubuntu, rode:                                |
+|                                                              |
+|     curl -fsSL https://openclaw.ai/install.sh | bash         |
+|     openclaw onboard --install-daemon                        |
+|                                                              |
+|  Guia: https://docs.openclaw.ai/platforms/windows            |
++--------------------------------------------------------------+
 "@ -ForegroundColor Green
 }
 
@@ -63,10 +63,10 @@ function Invoke-OpenClawInWsl {
 
     Write-Step "Instalando OpenClaw dentro do WSL2..."
 
-    # Habilita systemd se necessário
+    # Habilita systemd se necessario
     $wslConf = wsl $distroArg -- cat /etc/wsl.conf 2>&1
     if ($wslConf -notmatch "systemd=true") {
-        Write-WarnMessage "Habilitando systemd no WSL2 (necessário para o daemon)..."
+        Write-WarnMessage "Habilitando systemd no WSL2 (necessario para o daemon)..."
         wsl $distroArg -- bash -c "echo -e '[boot]\nsystemd=true' | sudo tee /etc/wsl.conf > /dev/null"
         wsl --shutdown
         Start-Sleep -Seconds 3
@@ -83,33 +83,33 @@ function Invoke-OpenClawInWsl {
     }
 }
 
-# ─── Windows nativo ──────────────────────────────────────────────────────────
+# --- Windows nativo -------------------------------------------------------------
 
 function Ensure-Winget {
     if (Get-Command winget -ErrorAction SilentlyContinue) { return $true }
-    Write-WarnMessage "winget não encontrado. Instale Node.js manualmente: https://nodejs.org"
+    Write-WarnMessage "winget nao encontrado. Instale Node.js manualmente: https://nodejs.org"
     return $false
 }
 
 function Ensure-Node {
     if (Get-Command node -ErrorAction SilentlyContinue) {
-        Write-Ok "Node.js já instalado: $(node --version)"
+        Write-Ok "Node.js ja instalado: $(node --version)"
         return
     }
 
-    Write-Step "Node.js não encontrado. Instalando Node LTS..."
+    Write-Step "Node.js nao encontrado. Instalando Node LTS..."
     if (-not (Ensure-Winget)) {
-        throw "Node.js ausente e winget indisponível. Instale Node.js LTS manualmente e reexecute."
+        throw "Node.js ausente e winget indisponivel. Instale Node.js LTS manualmente e reexecute."
     }
 
     winget install -e --id OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
 
-    # Atualiza PATH da sessão atual
+    # Atualiza PATH da sessao atual
     $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH", "Machine") + ";" +
                 [System.Environment]::GetEnvironmentVariable("PATH", "User")
 
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-        throw "Node.js não encontrado após instalação. Feche e reabra o PowerShell e rode novamente."
+        throw "Node.js nao encontrado apos instalacao. Feche e reabra o PowerShell e rode novamente."
     }
 
     Write-Ok "Node.js instalado: $(node --version)"
@@ -137,21 +137,21 @@ function Install-OpenClawViaNpm {
 }
 
 function Validate-Install {
-    Write-Step "Validando instalação"
+    Write-Step "Validando instalacao"
     if (-not (Get-Command openclaw -ErrorAction SilentlyContinue)) {
-        throw "Comando 'openclaw' não encontrado no PATH."
+        throw "Comando 'openclaw' nao encontrado no PATH."
     }
-    Write-Ok "OpenClaw disponível: $(openclaw --version)"
+    Write-Ok "OpenClaw disponivel: $(openclaw --version)"
 }
 
 function Invoke-NativeOnboard {
     Write-Step "Executando onboarding (Windows nativo)"
     Write-WarnMessage "AVISO: o Windows nativo tem um bug conhecido do Node.js ESM:"
-    Write-WarnMessage "  ERR_UNSUPPORTED_ESM_URL_SCHEME — caminhos 'C:\' não são URLs ESM válidas."
+    Write-WarnMessage "  ERR_UNSUPPORTED_ESM_URL_SCHEME  caminhos 'C:\' nao sao URLs ESM validas."
     Write-WarnMessage "Se ocorrer, use WSL2: https://docs.openclaw.ai/platforms/windows"
     Write-Host ""
 
-    # Workaround: NODE_PATH normalizado como file:// não resolve o bug do loader,
+    # Workaround: NODE_PATH normalizado como file:// nao resolve o bug do loader,
     # mas NODE_OPTIONS com --experimental-vm-modules pode ajudar em alguns casos.
     $env:NODE_OPTIONS = "--experimental-vm-modules"
 
@@ -162,39 +162,39 @@ function Invoke-NativeOnboard {
         Write-ErrorMessage "Onboarding falhou: $($_.Exception.Message)"
         Write-Host @"
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  Erro ESM no Windows nativo — solução recomendada: use WSL2          ║
-║                                                                      ║
-║  1. No PowerShell (Admin): wsl --install                             ║
-║  2. Reinicie o Windows.                                              ║
-║  3. Abra o Ubuntu e rode:                                            ║
-║     curl -fsSL https://openclaw.ai/install.sh | bash                 ║
-║     openclaw onboard --install-daemon                                ║
-║                                                                      ║
-║  Guia: https://docs.openclaw.ai/platforms/windows                    ║
-╚══════════════════════════════════════════════════════════════════════╝
++------------------------------------------------------------------------+
+|  Erro ESM no Windows nativo - solucao recomendada: use WSL2           |
+|                                                                        |
+|  1. No PowerShell (Admin): wsl --install                               |
+|  2. Reinicie o Windows.                                                |
+|  3. Abra o Ubuntu e rode:                                              |
+|     curl -fsSL https://openclaw.ai/install.sh | bash                   |
+|     openclaw onboard --install-daemon                                  |
+|                                                                        |
+|  Guia: https://docs.openclaw.ai/platforms/windows                      |
++------------------------------------------------------------------------+
 "@ -ForegroundColor Yellow
     }
 }
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+# --- Main -----------------------------------------------------------------------
 
 Write-Host ""
-Write-Host "  🦞  OpenClaw Installer para Windows" -ForegroundColor Magenta
+Write-Host "    OpenClaw Installer para Windows" -ForegroundColor Magenta
 Write-Host ""
 
-# Se não forçar nativo, tenta via WSL2 primeiro
+# Se nao forcar nativo, tenta via WSL2 primeiro
 if (-not $ForceNative) {
     if (Test-Wsl2Available) {
-        Write-Ok "WSL2 detectado — instalando via WSL2 (caminho recomendado)."
+        Write-Ok "WSL2 detectado  instalando via WSL2 (caminho recomendado)."
         Invoke-OpenClawInWsl
-        Write-Ok "Concluído via WSL2."
+        Write-Ok "Concluido via WSL2."
         exit 0
     }
     else {
         Write-Host ""
-        Write-Host "WSL2 não encontrado. O que deseja fazer?" -ForegroundColor Yellow
-        Write-Host "  [1] Instalar WSL2 agora (recomendado — evita bugs ESM do Node.js)" -ForegroundColor White
+        Write-Host "WSL2 nao encontrado. O que deseja fazer?" -ForegroundColor Yellow
+        Write-Host "  [1] Instalar WSL2 agora (recomendado  evita bugs ESM do Node.js)" -ForegroundColor White
         Write-Host "  [2] Continuar com Windows nativo (pode ter problemas)" -ForegroundColor White
         Write-Host ""
         $choice = Read-Host "Escolha (1 ou 2)"
@@ -204,15 +204,15 @@ if (-not $ForceNative) {
             exit 0
         }
         else {
-            Write-WarnMessage "Prosseguindo com instalação no Windows nativo."
+            Write-WarnMessage "Prosseguindo com instalacao no Windows nativo."
         }
     }
 }
 else {
-    Write-WarnMessage "Modo Windows nativo forçado via -ForceNative."
+    Write-WarnMessage "Modo Windows nativo forcado via -ForceNative."
 }
 
-# Instalação no Windows nativo
+# Instalacao no Windows nativo
 try {
     Install-OpenClawViaOfficialScript
 }
